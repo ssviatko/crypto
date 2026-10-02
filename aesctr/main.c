@@ -198,7 +198,7 @@ void do_process()
 
 void do_generate()
 {
-    // write 32 random bytes to g_keyfile
+    // write 48 random bytes OR deterministic hashed data to g_keyfile
     int res;
     int key_fd;
     struct stat l_keyfile_stat;
@@ -212,6 +212,7 @@ void do_generate()
             color_printf("*aaesctr:*d overwriting existing key file *b%s*d\n", g_outfile);
         }
     } else if ((res < 0) && (errno == ENOENT)) {
+	// we want the file to not exist, this is not an error
     } else {
         color_err_printf(1, "aesctr: unable to stat key file to check its existence");
         exit(EXIT_FAILURE);
@@ -227,6 +228,7 @@ void do_generate()
 	for (unsigned int i = 1; i <= g_pin; ++i) {
 	    sha512_ctx ctx;
 	    sha512_init(&ctx);
+	    // first time through the loop we use the length of our passphrase string, every time after it's the length of a sha512 hash
 	    sha512_update(&ctx, g_forward_hash, ((i == 1) ? strlen(g_forward_hash) : 64));
 	    sha512_final(&ctx, g_new);
 	    memcpy(g_forward_hash, g_new, 64);
@@ -330,7 +332,7 @@ int main(int argc, char **argv)
             case '?':
             {
                 color_printf("*hAES256 CTR Mode file encryptor*d\n");
-		color_printf("*aBy Stephen Sviatko - version: *h1.0*d\n");
+		color_printf("*aBy Stephen Sviatko - version: *h1.00*d\n");
 		color_printf("*adate: *h01/Oct/2026*d\n");
                 color_printf("*ausage: aesctr <options>*d\n");
                 color_printf("*a  -i (--in) <name>*d specify input file\n");
@@ -341,8 +343,9 @@ int main(int argc, char **argv)
                 color_printf("*a  -? (--help)*d this screen\n");
                 color_printf("*aoperational modes (select only one)*d\n");
                 color_printf("*a  -p (--process)*d encrypt/decrypt in->out with specified key\n");
-                color_printf("*a  -g (--generate)*d create random AES256 key\n");
-                color_printf("       write random key to file specified by -k or --key\n");
+                color_printf("*a  -g (--generate)*d create AES256 keys\n");
+                color_printf("       -g by itself writes random key to file specified by -k or --key\n");
+		color_printf("       use passphrase with optional PIN to generate a specific key.\n");
                 color_printf("       *bWARNING*d - use key only once or security will be compromised\n");
 		color_printf("*a     (--passphrase) <phrase>*d use passphrase to generate key\n");
 		color_printf("*a     (--pin) <PIN>*d specify an optional PIN to use with passphrase (1000-9999).\n");
