@@ -8,6 +8,7 @@
 #include <getopt.h>
 #include <sys/stat.h>
 
+#include "sha2.h"
 #include "aes.h"
 #include "color_print.h"
 
@@ -28,6 +29,13 @@ char g_keyfile[BUFFLEN];
 int g_keyfile_specified = 0;
 uint8_t g_key[32];
 uint8_t g_iv[16];
+char g_passphrase[BUFFLEN];
+int g_passphrase_specified = 0;
+int g_pin = 1000;
+// passphrase handling stuff
+char g_forward_hash[BUFFLEN];
+char g_new[64];
+
 
 int g_urandom_fd;
 
@@ -48,6 +56,8 @@ struct option g_options[] = {
     { "process", no_argument, NULL, 'p' },
     { "generate", no_argument, NULL, 'g' },
     { "overwrite", no_argument, NULL, 'w' },
+    { "passphrase", required_argument, NULL, 1002 },
+    { "pin", required_argument, NULL, 1003 },
     { NULL, 0, NULL, 0 }
 };
 
@@ -212,13 +222,29 @@ void do_generate()
         color_err_printf(1, "aesctr: error opening key file for writing");
         exit(EXIT_FAILURE);
     }
-    get_random(g_key, 32);
+    if (g_passphrase_specified) {
+	strcpy(g_forward_hash, g_passphrase);
+	for (unsigned int i = 1; i <= g_pin; ++i) {
+	    sha512_ctx ctx;
+	    sha512_init(&ctx);
+	    sha512_update(&ctx, g_forward_hash, ((i == 1) ? strlen(g_forward_hash) : 64));
+	    sha512_final(&ctx, g_new);
+	    memcpy(g_forward_hash, g_new, 64);
+	}
+	memcpy(g_key, g_forward_hash, 32);
+    } else {
+    	get_random(g_key, 32);
+    }
     res = write(key_fd, g_key, 32);
     if (res < 0) {
         color_err_printf(1, "aesctr: unable to write to key file");
         exit(EXIT_FAILURE);
     }
-    get_random(g_iv, 16);
+    if (g_passphrase_specified) {
+	memcpy(g_iv, g_forward_hash + 32, 16);
+    } else {
+        get_random(g_iv, 16);
+    }
     res = write(key_fd, g_iv, 16);
     if (res < 0) {
         color_err_printf(1, "aesctr: unable to write to key file");
@@ -249,7 +275,18 @@ int main(int argc, char **argv)
 		color_set_debug(g_debug);
             }
             break;
-             case 'i':
+	    case 1002:
+	    {
+		strcpy(g_passphrase, optarg);
+		g_passphrase_specified = 1;
+	    }
+	    break;
+	    case 1003:
+	    {
+		g_pin = atoi(optarg);
+	    }
+	    break;
+            case 'i':
             {
                 strcpy(g_infile, optarg);
                 g_infile_specified = 1;
@@ -292,7 +329,7 @@ int main(int argc, char **argv)
             break;
             case '?':
             {
-                color_printf("*aAES256 CTR Mode file encryptor*d\n");
+                color_printf("*hAES256 CTR Mode file encryptor*d\n");
 		color_printf("*aBy Stephen Sviatko - version: *h1.0*d\n");
 		color_printf("*adate: *h01/Oct/2026*d\n");
                 color_printf("*ausage: aesctr <options>*d\n");
@@ -307,8 +344,13 @@ int main(int argc, char **argv)
                 color_printf("*a  -g (--generate)*d create random AES256 key\n");
                 color_printf("       write random key to file specified by -k or --key\n");
                 color_printf("       *bWARNING*d - use key only once or security will be compromised\n");
+		color_printf("*a     (--passphrase) <phrase>*d use passphrase to generate key\n");
+		color_printf("*a     (--pin) <PIN>*d specify an optional PIN to use with passphrase (1000-9999).\n");
+		color_printf("       PIN will default to 1000 if unspecified.\n");
                 color_printf("*aexamples*d\n");
-                color_printf("*a  aesctr -gk <keyfile>*d  Generate new key and save to <keyfile>\n");
+                color_printf("*a  aesctr -gk <keyfile>*d  Generate new random key and save to <keyfile>\n");
+		color_printf("*a  aesctr -gk <keyfile> --passphrase \"my phrase\" --pin 1234*d\n");
+		color_printf("       Generate deterministic AES key hashed from passphrase/PIN.\n");
                 color_printf(" *a aesctr -p -i <infile> -o <outfile> -k <keyfile>*d  Process in->out\n");
                 exit(EXIT_SUCCESS);
             }
@@ -317,6 +359,12 @@ int main(int argc, char **argv)
     }
 
     setbuf(stdout, NULL); // disable buffering so we can print our progress
+
+    // police PIN to between 1000 and 9999
+    if ((g_pin < 1000) || (g_pin > 9999)) {
+	    color_err_printf(0, "aesctr: PIN must be between 1000-9999.");
+	    exit(EXIT_FAILURE);
+    }
 
     if (g_debug > 0)
         color_printf("*aaesctr:*d debug mode *benabled.*d\n");
@@ -370,6 +418,10 @@ int main(int argc, char **argv)
                 color_err_printf(0, "aesctr: this function requires that you specify a keyfile to write.");
                 exit(EXIT_FAILURE);
             }
+	    if (g_passphrase_specified == 1) {
+		    color_printf("*aaesctr:*d using passphrase *b%s*d.\n", g_passphrase);
+		    color_printf("*aaesctr:*d using PIN *b%d*d.\n", g_pin);
+	    }
             do_generate();
             color_printf("*aaesctr:*d *bWARNING*d - do not use this key more than once or security will be compromised.\n");
         }
